@@ -15,6 +15,12 @@ class Vec2:
     def get_yx(self):
         return Vec2(self._y, self._x)
 
+    def as_tuple(self):
+        return self._x, self._y
+
+    def __iter__(self):
+        return iter(self.as_tuple())
+
     def __add__(self, other):
         if type(other) == Vec2:
             return Vec2(self._x + other.get_x(), self._y + other.get_y())
@@ -59,3 +65,6 @@ class Vec2:
 
     def lerp(self, other, factor):  # linear interpolation
         return Vec2(self._x * (1 - factor) + other.get_x() * factor, self._y * (1 - factor) + other.get_y() * factor)
+
+    def __str__(self):
+        return f'Vec2({self._x}, {self._y})'
