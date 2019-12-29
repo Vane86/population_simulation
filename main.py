@@ -1,4 +1,47 @@
 import pygame
+from vecmath import Vec2
+
+
+class Drawable:
+
+    def __init__(self, position):
+        self._position = position
+
+    def set_position(self, pos):
+        self._position = pos
+
+    def get_position(self):
+        return self._position
+
+    def move(self, dp):
+        self._position = self._position + dp
+
+    def draw(self, surf):  # should be overridden
+        pass
+
+
+class Predator(Drawable):
+
+    def __init__(self, position):
+        super().__init__(position)
+
+    def update(self, dt):
+        pass
+
+    def draw(self, surf):
+        pass
+
+
+class Victim(Drawable):
+
+    def __init__(self, position):
+        super().__init__(position)
+
+    def update(self, dt):
+        pass
+
+    def draw(self, surf):
+        pass
 
 
 class Timer:
