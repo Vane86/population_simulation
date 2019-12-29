@@ -1,6 +1,23 @@
 import pygame
 
 
+class Timer:
+
+    def __init__(self, period):
+        self._period = period
+        self._time = 0
+
+    def set_period(self, period):
+        self._period = period
+
+    def update(self, dt):
+        self._time += dt
+        if self._time >= self._period:
+            self._time = 0
+            return True
+        return False
+
+
 class Simulation:
 
     def __init__(self, canvas):
