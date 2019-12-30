@@ -68,3 +68,8 @@ class Vec2:
 
     def __str__(self):
         return f'Vec2({self._x}, {self._y})'
+
+    def __eq__(self, other):
+        if type(other) != Vec2:
+            return False
+        return self._x == other.get_x() and self._y == other.get_y()
