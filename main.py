@@ -5,9 +5,12 @@ from math import pi, sin, cos
 import random
 
 
+APPLICATION_DISPLAY_SIZE = (640, 480)
+APPLICATION_FRAME_RATE = 60
+
 SIMULATION_METER = 32
 SIMULATION_SECOND = 1000
-SIMULATION_TIME_FACTOR = 100
+SIMULATION_TIME_FACTOR = 25
 
 VICTIM_FIND_FOOD_STATE = 0
 VICTIM_FIND_PARTNER_STATE = 1
@@ -18,6 +21,7 @@ VICTIM_HUNGER_WANT_EAT_THRESHOLD = 1000
 VICTIM_HUNGER_WANT_PARTNER_THRESHOLD = 500
 VICTIM_HUNGER_DIE_THRESHOLD = 5000
 VICTIM_HUNGER_GROWTH_SPEED = 1 / SIMULATION_SECOND
+VICTIM_EAT_SPEED = 5 / SIMULATION_SECOND  # hunger units
 
 VICTIM_BABY_PERIOD = 10000 * SIMULATION_SECOND  # sim second
 
@@ -39,6 +43,8 @@ class Drawable:
 
     def move(self, dp):
         self._position = self._position + dp
+        self._position = Vec2(self._position.get_x() % APPLICATION_DISPLAY_SIZE[0],
+                              self._position.get_y() % APPLICATION_DISPLAY_SIZE[1])
 
     def draw(self, surf):  # should be overridden
         pass
@@ -75,6 +81,7 @@ class Victim(Drawable):
         self._hunger = 0.0
         self._go_point = None
         self._baby_timer = Timer(VICTIM_BABY_PERIOD)
+        self._eating = False
 
     def get_state(self):
         return self._state
@@ -87,18 +94,36 @@ class Victim(Drawable):
             angle = random.uniform(0, 2 * pi)
             self._go_point = Vec2(cos(angle) * VICTIM_VIEW_RADIUS,
                                   sin(angle) * VICTIM_VIEW_RADIUS) + self._position
+            self._go_point = Vec2(min(max(self._go_point.get_x(), 0), APPLICATION_DISPLAY_SIZE[0]),
+                                  min(max(self._go_point.get_y(), 0), APPLICATION_DISPLAY_SIZE[1]))
         else:
             self._go_point = point
 
-    def get_move_vector(self):
+    def get_move_vector(self, sim_dt):
         dist_vec = (self._go_point - self._position)
-        if dist_vec.length() <= 1e-7:
+        if dist_vec.length() <= VICTIM_NORMAL_SPEED * sim_dt:
             return None
-        return (self._go_point - self._position).normalize() * VICTIM_NORMAL_SPEED
+        return dist_vec.normalize() * VICTIM_NORMAL_SPEED
+
+    def can_make_baby(self):
+        return self._baby_timer.is_elapsed() and not self._eating
+
+    def baby_made(self):
+        self._baby_timer.restart()
 
     def make_baby(self, other):
-        self._baby_timer.restart()
-        return Victim((self._position + other.get_position()) / 2)
+        if self.can_make_baby() and other.can_make_baby():
+            self.baby_made()
+            other.baby_made()
+            return Victim((self._position + other.get_position()) / 2)
+        return None
+
+    def eat(self, dt):
+        self._eating = True
+        self._hunger -= VICTIM_EAT_SPEED * dt
+        if self._hunger <= 0:
+            self._hunger = 0
+            self._eating = False
 
     def update(self, dt):
         self._baby_timer.update(dt)
@@ -107,9 +132,9 @@ class Victim(Drawable):
             self._state = VICTIM_DEAD_STATE
         elif self._hunger >= VICTIM_HUNGER_WANT_EAT_THRESHOLD:
             self._state = VICTIM_FIND_FOOD_STATE
-        elif self._hunger < VICTIM_HUNGER_WANT_PARTNER_THRESHOLD and self._baby_timer.is_elapsed():
+        elif self._hunger < VICTIM_HUNGER_WANT_PARTNER_THRESHOLD and self.can_make_baby():
             self._state = VICTIM_FIND_PARTNER_STATE
-        else:
+        elif not self._eating:
             self._state = VICTIM_NORMAL_STATE
 
     def draw(self, surf):
@@ -187,21 +212,20 @@ class Simulation:
 
     def setup(self):
         for i in range(100):
-            self.add_victim(Victim(Vec2(random.randint(0, Application.DISPLAY_SIZE[0]),
-                                        random.randint(0, Application.DISPLAY_SIZE[1]))))
+            self.add_victim(Victim(Vec2(random.randint(0, APPLICATION_DISPLAY_SIZE[0]),
+                                        random.randint(0, APPLICATION_DISPLAY_SIZE[1]))))
         for i in range(33):
-            self.add_victim_food(VictimFood(Vec2(random.randint(0, Application.DISPLAY_SIZE[0]),
-                                                 random.randint(0, Application.DISPLAY_SIZE[1]))))
+            self.add_victim_food(VictimFood(Vec2(random.randint(0, APPLICATION_DISPLAY_SIZE[0]),
+                                                 random.randint(0, APPLICATION_DISPLAY_SIZE[1]))))
 
     def _process_victims(self, sim_dt):
         for victim in self._victims[:]:
             victim.update(sim_dt)
-            print(victim.get_state())
             if victim.get_state() == VICTIM_DEAD_STATE:
                 self._victims.remove(victim)
                 continue
             elif victim.get_state() == VICTIM_NORMAL_STATE:
-                if not victim.has_go_point() or victim.get_move_vector() is None:
+                if not victim.has_go_point() or victim.get_move_vector(sim_dt) is None:
                     victim.set_go_point()
             elif victim.get_state() == VICTIM_FIND_PARTNER_STATE:
                 partners = list()
@@ -215,15 +239,43 @@ class Simulation:
                     partner = min(partners, key=lambda x: (victim.get_position() - x.get_position()).length())
                 if partner is not None:
                     victim.set_go_point(partner.get_position())
-                    vmv = victim.get_move_vector()
+                    vmv = victim.get_move_vector(sim_dt)
                     if vmv is None or vmv.length() <= 0.5 * SIMULATION_METER:
-                        self.add_victim(victim.make_baby(partner))
-                elif not victim.has_go_point() or victim.get_move_vector() is None:
+                        baby = victim.make_baby(partner)
+                        if baby:
+                            self.add_victim(baby)
+                elif not victim.has_go_point() or victim.get_move_vector(sim_dt) is None:
+                    victim.set_go_point()
+            elif victim.get_state() == VICTIM_FIND_FOOD_STATE:
+                foods = list()
+                for f in self._victim_foods:
+                    if (f.get_position() - victim.get_position()).length() <= VICTIM_VIEW_RADIUS:
+                        foods.append(f)
+                food = None
+                if foods:
+                    food = min(foods, key=lambda x: (victim.get_position() - x.get_position()).length())
+                if food is not None:
+                    victim.set_go_point(food.get_position())
+                    vmv = victim.get_move_vector(sim_dt)
+                    if vmv is None or vmv.length() <= 0.5 * SIMULATION_METER:
+                        victim.eat(sim_dt)
+                elif not victim.has_go_point() or victim.get_move_vector(sim_dt) is None:
                     victim.set_go_point()
 
-            if victim.get_move_vector() is not None:
-                victim.move(victim.get_move_vector() * sim_dt)
+            if victim.get_move_vector(sim_dt) is not None:
+                victim.move(victim.get_move_vector(sim_dt) * sim_dt)
             victim.draw(self._canvas)
+
+    def _print_stats(self):
+        print(f'Victims: {len(self._victims)}')
+        print(f'Victims in state 0: {len(list(filter(lambda x: x.get_state() == 0, self._victims)))}')
+        print(f'Victims in state 1: {len(list(filter(lambda x: x.get_state() == 1, self._victims)))}')
+        print(f'Victims in state 2: {len(list(filter(lambda x: x.get_state() == 2, self._victims)))}')
+        print(f'Victims in state 3: {len(list(filter(lambda x: x.get_state() == 3, self._victims)))}')
+
+    def process_input_event(self, event):
+        if event.type == pygame.KEYDOWN:
+            self._print_stats()
 
     def loop(self, dt):
 
@@ -241,13 +293,10 @@ class Simulation:
 
 class Application:
 
-    DISPLAY_SIZE = (640, 480)
-    FRAME_RATE = 60
-
     def __init__(self):
 
         pygame.init()
-        self._screen = pygame.display.set_mode(Application.DISPLAY_SIZE)
+        self._screen = pygame.display.set_mode(APPLICATION_DISPLAY_SIZE)
         self._clock = pygame.time.Clock()
 
         self._running = True
@@ -258,10 +307,11 @@ class Application:
     def loop(self):
 
         while self._running:
-            dt = self._clock.tick(Application.FRAME_RATE)
+            dt = self._clock.tick(APPLICATION_FRAME_RATE)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._running = False
+                self._simulation.process_input_event(event)
 
             self._screen.fill((0, 0, 0))
             self._simulation.loop(dt)
