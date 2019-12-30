@@ -5,6 +5,27 @@ from math import pi, sin, cos
 import random
 
 
+SIMULATION_METER = 32
+SIMULATION_SECOND = 1000
+SIMULATION_TIME_FACTOR = 100
+
+VICTIM_FIND_FOOD_STATE = 0
+VICTIM_FIND_PARTNER_STATE = 1
+VICTIM_NORMAL_STATE = 2
+VICTIM_DEAD_STATE = 3
+
+VICTIM_HUNGER_WANT_EAT_THRESHOLD = 1000
+VICTIM_HUNGER_WANT_PARTNER_THRESHOLD = 500
+VICTIM_HUNGER_DIE_THRESHOLD = 5000
+VICTIM_HUNGER_GROWTH_SPEED = 1 / SIMULATION_SECOND
+
+VICTIM_BABY_PERIOD = 10000 * SIMULATION_SECOND  # sim second
+
+VICTIM_NORMAL_SPEED = 0.5 * SIMULATION_METER / SIMULATION_SECOND  # per second
+
+VICTIM_VIEW_RADIUS = 2 * SIMULATION_METER
+
+
 class Drawable:
 
     def __init__(self, position):
@@ -48,28 +69,12 @@ class VictimFood(Drawable):
 
 class Victim(Drawable):
 
-    FIND_FOOD_STATE = 0
-    FIND_PARTNER_STATE = 1
-    NORMAL_STATE = 2
-    DEAD_STATE = 3
-
-    HUNGER_WANT_EAT_THRESHOLD = 1000
-    HUNGER_WANT_PARTNER_THRESHOLD = 500
-    HUNGER_DIE_THRESHOLD = 5000
-    HUNGER_GROWTH_SPEED = 1  # units per sim second
-
-    BABY_PERIOD = 10000  # sim second
-
-    NORMAL_SPEED = 0.5  # sim meters per second
-
-    VIEW_RADIUS = 2  # sim meters
-
     def __init__(self, position):
         super().__init__(position)
-        self._state = Victim.NORMAL_STATE
+        self._state = VICTIM_NORMAL_STATE
         self._hunger = 0.0
         self._go_point = None
-        self._baby_timer = Timer(Victim.BABY_PERIOD * 1000)
+        self._baby_timer = Timer(VICTIM_BABY_PERIOD)
 
     def get_state(self):
         return self._state
@@ -80,8 +85,8 @@ class Victim(Drawable):
     def set_go_point(self, point=None):
         if point is None:
             angle = random.uniform(0, 2 * pi)
-            self._go_point = Vec2(cos(angle) * Victim.VIEW_RADIUS * Simulation.METER,
-                                  sin(angle) * Victim.VIEW_RADIUS * Simulation.METER) + self._position
+            self._go_point = Vec2(cos(angle) * VICTIM_VIEW_RADIUS,
+                                  sin(angle) * VICTIM_VIEW_RADIUS) + self._position
         else:
             self._go_point = point
 
@@ -89,7 +94,7 @@ class Victim(Drawable):
         dist_vec = (self._go_point - self._position)
         if dist_vec.length() <= 1e-7:
             return None
-        return (self._go_point - self._position).normalize() * Victim.NORMAL_SPEED
+        return (self._go_point - self._position).normalize() * VICTIM_NORMAL_SPEED
 
     def make_baby(self, other):
         self._baby_timer.restart()
@@ -97,15 +102,15 @@ class Victim(Drawable):
 
     def update(self, dt):
         self._baby_timer.update(dt)
-        self._hunger += Victim.HUNGER_GROWTH_SPEED / 1000 * dt
-        if self._hunger >= Victim.HUNGER_DIE_THRESHOLD:
-            self._state = Victim.DEAD_STATE
-        elif self._hunger >= Victim.HUNGER_WANT_EAT_THRESHOLD:
-            self._state = Victim.FIND_FOOD_STATE
-        elif self._hunger < Victim.HUNGER_WANT_PARTNER_THRESHOLD and self._baby_timer.is_elapsed():
-            self._state = Victim.FIND_PARTNER_STATE
+        self._hunger += VICTIM_HUNGER_GROWTH_SPEED * dt
+        if self._hunger >= VICTIM_HUNGER_DIE_THRESHOLD:
+            self._state = VICTIM_DEAD_STATE
+        elif self._hunger >= VICTIM_HUNGER_WANT_EAT_THRESHOLD:
+            self._state = VICTIM_FIND_FOOD_STATE
+        elif self._hunger < VICTIM_HUNGER_WANT_PARTNER_THRESHOLD and self._baby_timer.is_elapsed():
+            self._state = VICTIM_FIND_PARTNER_STATE
         else:
-            self._state = Victim.NORMAL_STATE
+            self._state = VICTIM_NORMAL_STATE
 
     def draw(self, surf):
         pygame.draw.ellipse(surf,
@@ -163,15 +168,12 @@ class Timer:
 
 class Simulation:
 
-    METER = 32
-    TIME_FACTOR = 10
-
     def __init__(self, canvas):
         self._canvas = canvas
         self._victims = list()
         self._victim_foods = list()
         self._predators = list()
-        self._time_line = TimeLine(Simulation.TIME_FACTOR)
+        self._time_line = TimeLine(SIMULATION_TIME_FACTOR)
 
     def add_victim(self, victim):
         if type(victim) != Victim:
@@ -194,18 +196,19 @@ class Simulation:
     def _process_victims(self, sim_dt):
         for victim in self._victims[:]:
             victim.update(sim_dt)
-            if victim.get_state() == Victim.DEAD_STATE:
+            print(victim.get_state())
+            if victim.get_state() == VICTIM_DEAD_STATE:
                 self._victims.remove(victim)
                 continue
-            elif victim.get_state() == Victim.NORMAL_STATE:
+            elif victim.get_state() == VICTIM_NORMAL_STATE:
                 if not victim.has_go_point() or victim.get_move_vector() is None:
                     victim.set_go_point()
-            elif victim.get_state() == Victim.FIND_PARTNER_STATE:
+            elif victim.get_state() == VICTIM_FIND_PARTNER_STATE:
                 partners = list()
                 for v in self._victims:
                     if v == victim:
                         continue
-                    if (v.get_position() - victim.get_position()).length() <= Victim.VIEW_RADIUS * Simulation.METER:
+                    if (v.get_position() - victim.get_position()).length() <= VICTIM_VIEW_RADIUS:
                         partners.append(v)
                 partner = None
                 if partners:
@@ -213,12 +216,13 @@ class Simulation:
                 if partner is not None:
                     victim.set_go_point(partner.get_position())
                     vmv = victim.get_move_vector()
-                    if vmv is None or vmv.length() <= 0.5 * Simulation.METER:
+                    if vmv is None or vmv.length() <= 0.5 * SIMULATION_METER:
                         self.add_victim(victim.make_baby(partner))
                 elif not victim.has_go_point() or victim.get_move_vector() is None:
                     victim.set_go_point()
 
-            victim.move(victim.get_move_vector())
+            if victim.get_move_vector() is not None:
+                victim.move(victim.get_move_vector() * sim_dt)
             victim.draw(self._canvas)
 
     def loop(self, dt):
@@ -227,7 +231,6 @@ class Simulation:
         sim_dt = self._time_line.get_delta_time()
 
         self._process_victims(sim_dt)
-        print(len(self._victims))
 
         for food in self._victim_foods:
             food.draw(self._canvas)
